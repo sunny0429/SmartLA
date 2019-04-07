@@ -13,27 +13,31 @@ import pprint
 import iota
 import base64
 from Crypto.Cipher import AES
-
+import threading
+import requests
+import datetime
 # Establish Connection
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-IP_address = str(sys.argv[1])
-Port = int(sys.argv[2])
-server.connect((IP_address, Port))
 
 # Connect to the tangle
 seed = ""
 client = "http://node02.iotatoken.nl:14265"
 iota_api = iota.Iota(client, seed)
-
+server = ""
 # Generate keys
 encrypt_key = RSA.generate(2048)
 signature_key = RSA.generate(2048, e=65537)
-
+time = 0
+rate = ""
+spot=""
+lat=""
+lng=""
+mac_id="f0:18:98:3e:ee:f9"
+model_id="Tesla S3"
 # Set values
 invoice_address = iota_api.get_new_addresses(count=1)
 invoice_address = str(invoice_address['addresses'][0].address)
 bs = 32
-
+data_test=""
 # Info to be received from Seller
 payment_address = ""
 payment_granularity = 0
@@ -168,7 +172,8 @@ def dataTransfer():
     filename = data_type + ".txt"
     f = open(filename, "a")
     remaining = quantity
-
+    global time,rate,spot,lat,lng
+   
     print "-------Receiving Data Starts-------"
     while counter <= quantity:
         message = server.recv(2048)
@@ -217,6 +222,9 @@ def dataTransfer():
         # print pprint.pprint(json.loads(json_string))
 
         counter = counter + 1
+    datas = {"duration":time,"rate":rate,"spot":spot,"lat":lat,"long":lng,"timestamp":str(datetime.datetime.now())}
+    datas = json.dumps(datas)
+    r = requests.post(url = 'http://127.0.0.1:8083/update', data = datas) 
     print "-------Receiving Data Ends--------"
     return remaining
 
@@ -229,9 +237,9 @@ def prepareOrderData(data_type, quantity, currency):
 
     data['signature-key'] = signature_key.publickey().exportKey('OpenSSH')
     data['encryption-key'] = encrypt_key.publickey().exportKey('OpenSSH')
-
     data['address'] = invoice_address
-
+    data['model_id'] = model_id
+    data['mac_id'] = mac_id
     return data
 
 def placeOrder(available_data):
@@ -244,8 +252,7 @@ def placeOrder(available_data):
 
     print "\nPlease enter the type of data, quantity and currency you wish to pay"
     print "Data type: ",
-    data_type = sys.stdin.readline()
-    data_type = data_type.strip()
+    data_type = 'gas'
 
     # TODO validate user input
     '''
@@ -256,11 +263,10 @@ def placeOrder(available_data):
     cost = int(available_data[data_type])
 
     print "Quantity: ",
-    quantity = sys.stdin.readline()
-    quantity = int(quantity)
+    quantity = 1
 
     print "Currency: ",
-    currency = sys.stdin.readline()
+    currency = 'iota'
 
     buyer_order = str(data_type)+ ' ' + str(quantity)
 
@@ -274,9 +280,8 @@ def placeOrder(available_data):
     data = prepareOrderData(data_type, quantity, currency)
 
     json_string = prepareJSONstring("ORDER", json.dumps(data), signature, transaction_hash)
-
+    print('sending to server',json_string)
     server.send(json_string)
-
     # Receive Session Key
     message = server.recv(2048)
     message = json.loads(message)
@@ -287,13 +292,18 @@ def receiveMenu():
     Receive the Menu and other details from the Seller
     :return: Returns the Menu
     """
-    global payment_address, payment_granularity, signature_required, seller_public_key
+    global payment_address, payment_granularity, signature_required, seller_public_key,time,rate,spot,lat,lng
 
     message = server.recv(2048)
     message = json.loads(message)
     data = json.loads(str(message['data']))
-
+    print('in menu')
     pprint.pprint(data)
+    time = data['duration']
+    rate = data['rate']
+    spot = data['spot']
+    lat = data['lat']
+    lng = data['long']
 
     payment_granularity = int(data['payment-granularity'])
     payment_address = iota.Address(str(data['payment-address']))
@@ -303,22 +313,72 @@ def receiveMenu():
     if verifySignature(message['data'], message['signature']) is not True:
         print "Invalid Signature, exiting.."
         exit()
-
+    #
+    #data_test=data['menu']
     return data['menu']
 
 
-if len(sys.argv) != 3:
-    print "Correct usage: script, IP address, port number"
-    exit()
+ 
 
-while True:
 
+def open_connection():
+    global server
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    IP_address = '127.0.0.1'
+    Port = 8080
+    server.connect((IP_address, Port))
+
+
+
+# while True:
+
+#     available_data = receiveMenu()
+
+#     placeOrder(available_data)
+
+#     remaining = dataTransfer()
+
+#     data = "close"
+#     signature = None
+#     transaction_hash = None
+#     if signature_required == 1:
+#         signature = signData(data)
+
+#     if remaining > 0:
+#         # value = remaining * cost
+#         value = 0
+#         print "Payment made for the remaining data: ",
+#         transaction_hash = prepareTransaction(value=value)
+
+#     json_string = prepareJSONstring("EXIT", data, signature, transaction_hash)
+#     server.send(json_string)
+#     print "Done!"
+#     break
+# available_data = receiveMenu()
+# placeOrder(available_data)
+# remaining = dataTransfer()
+# data = "close"
+# signature = None
+# transaction_hash = None
+# if signature_required == 1:
+#     signature = signData(data)
+
+# if remaining > 0:
+#             # value = remaining * cost
+#     value = 0
+#     print "Payment made for the remaining data: ",
+#     transaction_hash = prepareTransaction(value=value)
+
+# json_string = prepareJSONstring("EXIT", data, signature, transaction_hash)
+# server.send(json_string)
+#open_connection()
+def test():
+    global time
+    open_connection()
+    print('in test')
     available_data = receiveMenu()
-
     placeOrder(available_data)
-
     remaining = dataTransfer()
-
     data = "close"
     signature = None
     transaction_hash = None
@@ -326,14 +386,16 @@ while True:
         signature = signData(data)
 
     if remaining > 0:
-        # value = remaining * cost
+                # value = remaining * cost
         value = 0
         print "Payment made for the remaining data: ",
         transaction_hash = prepareTransaction(value=value)
-
     json_string = prepareJSONstring("EXIT", data, signature, transaction_hash)
     server.send(json_string)
-    print "Done!"
-    break
-
-server.close()
+    threading.Timer(time,test())
+    server.close()
+test()
+# timer = threading.Timer(0.5, test()) 
+# timer.start()
+# print('cool')
+#server.close()

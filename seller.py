@@ -16,7 +16,8 @@ import iota
 import logging
 import json
 import pprint
-
+import requests
+import datetime
 
 # Seller's Keys
 key = RSA.generate(2048)
@@ -25,14 +26,15 @@ seller_public_key = key.publickey().exportKey('OpenSSH')
 # Establish Connection
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-IP_address = str(sys.argv[1])
-Port = int(sys.argv[2])
+IP_address = '127.0.0.1'
+Port = 8080
 server.bind((IP_address, Port))
-
 # Number of buyers the seller can handle. Can be increased.
 server.listen(500)
-
+mac_id=""
+model_id=""
 # IOTA Related
+
 seed = ""
 client = "http://node02.iotatoken.nl:14265"
 iota_api = iota.Iota(client, seed)
@@ -171,6 +173,7 @@ def dataTransfer():
     Actual Data Transfer happens here
     :return: Remaining data for which money is yet to be paid
     """
+    global model_id,mac_id,currency
     with open('menu.json') as myfile:
         menu = myfile.read()
         menu = json.loads(menu)
@@ -236,7 +239,11 @@ def dataTransfer():
         # print pprint.pprint(message)
 
         counter = counter + 1
-    print "--------Data Transfer Ends---------"
+        #print('message',counter,message)
+        datas = {"model_id":model_id,"mac_id":mac_id,"payment_method":currency,"timestamp":str(datetime.datetime.now())}
+        datas = json.dumps(datas)
+    r = requests.post(url = 'http://127.0.0.1:8082/update', data = datas) 
+    print "--------Data Transfer Ends--------"
     return remaining
 
 def receiveOrder():
@@ -244,8 +251,10 @@ def receiveOrder():
     Process the order from the buyer and stores other informations provided by the buyer
     :return: None
     """
-    global invoice_address, encrypt_pub_key, signature_pub_key, data_type, quantity, currency
+    global invoice_address, encrypt_pub_key, signature_pub_key, data_type, quantity, currency,mac_id,model_id
     message = conn.recv(2048)
+    print('message from buyer',message)
+
     message = json.loads(message)
 
     data = json.loads(message['data'])
@@ -257,7 +266,8 @@ def receiveOrder():
     encrypt_pub_key = RSA.importKey(data['encryption-key'])
     signature_pub_key = RSA.importKey(data['signature-key'])
     invoice_address = iota.Address(str(data['address']))
-
+    mac_id = str(data['mac_id'])
+    model_id = str(data['model_id'])
     buyer_order = str(data_type) + ' ' + str(quantity)
 
     if verifySignature(buyer_order, message['signature']) is not True:
@@ -274,6 +284,8 @@ def receiveOrder():
     conn.send(json_string)
 
 def prepareMenuData():
+    print('in prepareMenuData')
+
     with open('menu.json') as myfile:
         menu = myfile.read()
         menu = json.loads(menu)
@@ -292,16 +304,18 @@ def sendMenu():
     Send the Menu with other details to the Buyer
     :return: None
     """
+    print 'in send menu'
     json_string = prepareMenuData()
     conn.send(json_string)
 
 
 # checks whether sufficient arguments have been provided
-if len(sys.argv) != 3:
-    print "Correct usage: script, IP address, port number"
-    exit()
+# if len(sys.argv) != 3:
+#     print "Correct usage: script, IP address, port number"
+#     exit()
 
 def clientthread(conn, addr):
+
     sendMenu()
     receiveOrder()
     remaining  = dataTransfer()
